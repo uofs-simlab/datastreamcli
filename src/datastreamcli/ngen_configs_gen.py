@@ -115,22 +115,25 @@ def gen_noah_owp_confs_from_pkl(
             fp.writelines(jcatch_str)
 
 
-WATERBODY_COLUMNS = ("WaterbodyID", "rl_NHDWaterbodyComID")
+# Each tuple is one field. The first name is hydrofabric 2.2.
+# Palisade 2.1 uses a later name in the same tuple.
+FABRIC_COLUMNS = {
+    "waterbody": ("WaterbodyID", "rl_NHDWaterbodyComID"),
+    "dx": ("Length_m", "length_m"),
+    "gages": ("gage", "gages", "rl_gages"),
+}
 
 
-def waterbody_column_name(*paths: str) -> str:
-    """
-    WaterbodyID and rl_NHDWaterbodyComID are the same field.
-    Hydrofabric 2.2 uses the first name. The Palisade 2.1 geopackage uses the second.
-    """
+def fabric_column_names(*paths: str) -> dict:
+    """Return the column name this hydrofabric has for each t-route field."""
+    present = set()
     for path in paths:
-        if not path or not os.path.isfile(path):
-            continue
-        present = _gpkg_column_names(path)
-        for name in WATERBODY_COLUMNS:
-            if name in present:
-                return name
-    return WATERBODY_COLUMNS[0]
+        if path and os.path.isfile(path):
+            present.update(_gpkg_column_names(path))
+    return {
+        key: next((name for name in names if name in present), names[0])
+        for key, names in FABRIC_COLUMNS.items()
+    }
 
 
 def _gpkg_column_names(path: str) -> set:
@@ -187,7 +190,7 @@ def generate_troute_conf(
     nts = max_loop_size * qts_subdivisions
 
     cpus = os.cpu_count()
-    waterbody_column = waterbody_column_name(hydrofabric, geo_file_path)
+    fabric_columns = fabric_column_names(hydrofabric, geo_file_path)
 
     troute_conf_str = conf_template
     for j, jline in enumerate(conf_template):
@@ -211,9 +214,10 @@ def generate_troute_conf(
         if re.search(pattern, jline):
             troute_conf_str[j] = re.sub(pattern, f"\\1 {geo_file_path}", jline)
 
-        pattern = r'^(\s*waterbody:\s*)".*"\s*$'
-        if re.search(pattern, jline):
-            troute_conf_str[j] = re.sub(pattern, f'\\1"{waterbody_column}"', jline)
+        for field, column in fabric_columns.items():
+            pattern = rf'^(\s*{field}:\s*)".*"\s*$'
+            if re.search(pattern, jline):
+                troute_conf_str[j] = re.sub(pattern, f'\\1"{column}"', jline)
 
         pattern = r"^\s*cpu_pool\s*:\s*\d+"
         if re.search(pattern, jline):
